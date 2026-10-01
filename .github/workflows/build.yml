@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        config_name: [ minimal, full ]
+        config_name: [ minimal, full, mt7987_mt7992_mwan3 ]
     steps:
       - name: Checkout My Repository Source
         uses: actions/checkout@v4
