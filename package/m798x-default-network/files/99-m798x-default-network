@@ -1,0 +1,122 @@
+#!/bin/sh
+# m798x-default-network
+# 在首次启动时强制设置 Tenda BE12 Pro 的网络配置
+# 这个脚本会被 OpenWrt 在第一次开机时执行一次，执行完会删除自己
+
+. /lib/functions.sh
+
+logger -t m798x-default-network "Applying baked-in network defaults for Tenda BE12 Pro..."
+
+# ============= NETWORK =============
+
+# 1. 清空默认 LAN 配置
+uci -q delete network.lan
+uci -q delete network.wan
+uci -q delete network.wan6
+
+# 2. 创建 br-lan device（bridge = eth1 + lan4 + lan5）
+uci -q delete network.@device[0] 2>/dev/null
+uci add network device
+uci set network.@device[-1].name='br-lan'
+uci set network.@device[-1].type='bridge'
+uci set network.@device[-1].ports='eth1 lan4 lan5'
+
+# 3. LAN 接口
+uci add network interface
+uci set network.@interface[-1].name='lan'
+uci set network.@interface[-1].device='br-lan'
+uci set network.@interface[-1].proto='static'
+uci set network.@interface[-1].ipaddr='192.168.100.254'
+uci set network.@interface[-1].netmask='255.255.255.0'
+uci set network.@interface[-1].ip6assign='60'
+
+# 4. WAN 接口 (PPPoE)
+uci add network interface
+uci set network.@interface[-1].name='wan'
+uci set network.@interface[-1].device='eth2'
+uci set network.@interface[-1].proto='pppoe'
+uci set network.@interface[-1].username='13545211473@jtkd'
+uci set network.@interface[-1].password='888888'
+uci set network.@interface[-1].ipv6='auto'
+uci set network.@interface[-1].norelease='1'
+
+# 5. WAN6 接口 (DHCPv6 on eth2)
+uci add network interface
+uci set network.@interface[-1].name='wan6'
+uci set network.@interface[-1].device='eth2'
+uci set network.@interface[-1].proto='dhcpv6'
+
+# 6. WAN0 接口 (DHCP on lan3) - 第二 WAN
+uci add network interface
+uci set network.@interface[-1].name='wan0'
+uci set network.@interface[-1].proto='dhcp'
+uci set network.@interface[-1].device='lan3'
+uci set network.@interface[-1].metric='10'
+
+# 7. Globals
+uci set network.globals.packet_steering='1'
+uci set network.globals.ula_prefix='fdcd:138d:877e::/48'
+
+# ============= FIREWALL =============
+
+# 1. defaults
+uci set firewall.@defaults[0].syn_flood='1'
+uci set firewall.@defaults[0].input='REJECT'
+uci set firewall.@defaults[0].output='ACCEPT'
+uci set firewall.@defaults[0].forward='REJECT'
+uci set firewall.@defaults[0].flow_offloading='0'
+uci set firewall.@defaults[0].flow_offloading_hw='0'
+# FullCone 按用户要求关掉 (在新固件默认 disabled，这里显式设 0 兜底)
+uci set firewall.@defaults[0].fullcone='0'
+uci set firewall.@defaults[0].fullcone6='0'
+
+# 2. wan zone 加入 wan0（关键！让第二条 WAN 也能 NAT 出）
+uci -q delete firewall.@zone[1].network
+uci add_list firewall.@zone[1].network='wan'
+uci add_list firewall.@zone[1].network='wan6'
+uci add_list firewall.@zone[1].network='wan0'
+uci set firewall.@zone[1].masq='1'
+uci set firewall.@zone[1].mtu_fix='1'
+
+# ============= DHCP =============
+
+# LAN DHCP pool 从 100 开始，限制 150 个
+uci set dhcp.lan.interface='lan'
+uci set dhcp.lan.start='100'
+uci set dhcp.lan.limit='150'
+uci set dhcp.lan.leasetime='12h'
+uci set dhcp.lan.dhcpv4='server'
+uci set dhcp.lan.ra='server'
+uci set dhcp.lan.ra_flags='other-config'
+uci set dhcp.lan.max_preferred_lifetime='2700'
+uci set dhcp.lan.max_valid_lifetime='5400'
+
+# WAN 不分配 DHCP
+uci set dhcp.wan.interface='wan'
+uci set dhcp.wan.ignore='1'
+
+# ============= SYSTEM =============
+uci set system.@system[0].hostname='ImmortalWrt'
+uci set system.@system[0].timezone='CST-8'
+uci set system.@system[0].zonename='Asia/Shanghai'
+
+# NTP
+uci -q delete system.ntp.server
+uci add_list system.ntp.server='ntp.tencent.com'
+uci add_list system.ntp.server='ntp1.aliyun.com'
+uci add_list system.ntp.server='ntp.ntsc.ac.cn'
+uci add_list system.ntp.server='cn.ntp.org.cn'
+uci set system.ntp.enable_server='0'
+
+# ============= COMMIT =============
+uci commit network
+uci commit firewall
+uci commit dhcp
+uci commit system
+
+logger -t m798x-default-network "Baked-in network defaults applied successfully"
+logger -t m798x-default-network "LAN=192.168.100.254 (br-lan: eth1+lan4+lan5)"
+logger -t m798x-default-network "WAN=PPPoE on eth2 (13545211473@jtkd)"
+logger -t m798x-default-network "WAN0=DHCP on lan3"
+
+exit 0
